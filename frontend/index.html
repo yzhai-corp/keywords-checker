@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商品コピーチェッカー</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 商品コピーチェッカー</h1>
+            <p class="subtitle">薬機法・景表法に基づく商品コピーの自動チェックツール</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="single">単一チェック</button>
+            <button class="tab-button" data-tab="batch">一括チェック (Excel)</button>
+        </div>
+
+        <!-- Single Check Tab -->
+        <div class="tab-content active" id="single-tab">
+            <div class="card">
+                <h2>単一商品のチェック</h2>
+                
+                <div class="form-group">
+                    <label for="skill-select">スキル選択:</label>
+                    <select id="skill-select" class="form-control">
+                        <option value="商品コピーチェック">商品コピーチェック</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="product-info">商品情報:</label>
+                    <textarea 
+                        id="product-info" 
+                        class="form-control" 
+                        rows="10" 
+                        placeholder="商品名: テスト商品&#10;説明: この商品は...&#10;キャッチコピー: ..."
+                    ></textarea>
+                    <small class="help-text">商品情報を入力してください（商品名、説明、キャッチコピーなど）</small>
+                </div>
+
+                <button id="check-button" class="btn btn-primary">チェック実行</button>
+
+                <div id="single-result" class="result-container" style="display: none;">
+                    <h3>チェック結果</h3>
+                    <div id="single-conclusion" class="conclusion"></div>
+                    <div id="single-details" class="details"></div>
+                    <div id="single-usage" class="usage-info"></div>
+                </div>
+
+                <div id="single-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>チェック中...</p>
+                </div>
+
+                <div id="single-error" class="error-message" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Batch Check Tab -->
+        <div class="tab-content" id="batch-tab">
+            <div class="card">
+                <h2>Excelファイルによる一括チェック</h2>
+                
+                <div class="info-box">
+                    <h4>📋 使い方:</h4>
+                    <ol>
+                        <li>Excelファイルに商品情報を記載（各行が1つの商品）</li>
+                        <li>列名は「商品名」「説明」「キャッチコピー」などを使用</li>
+                        <li>ファイルをアップロードして「一括チェック実行」をクリック</li>
+                        <li>結果がExcelファイルでダウンロードされます</li>
+                    </ol>
+                </div>
+
+                <div class="form-group">
+                    <label for="excel-file">Excelファイル (.xlsx):</label>
+                    <input 
+                        type="file" 
+                        id="excel-file" 
+                        class="form-control" 
+                        accept=".xlsx,.xls"
+                    >
+                    <small class="help-text">アップロード可能な形式: .xlsx, .xls</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="batch-skill-select">スキル選択:</label>
+                    <select id="batch-skill-select" class="form-control">
+                        <option value="商品コピーチェック">商品コピーチェック</option>
+                    </select>
+                </div>
+
+                <button id="batch-check-button" class="btn btn-primary" disabled>一括チェック実行</button>
+
+                <div id="batch-loading" class="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>一括チェック中... しばらくお待ちください</p>
+                </div>
+
+                <div id="batch-error" class="error-message" style="display: none;"></div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Powered by LiteLLM API</p>
+            <p class="note">※ このツールは一次チェックを支援するものです。最終判断は必ず専門家が行ってください。</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
