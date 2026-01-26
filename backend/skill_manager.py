@@ -4,6 +4,7 @@ Loads skill definitions and reference files from the skills directory
 """
 
 import os
+import re
 import logging
 import yaml
 from pathlib import Path
@@ -151,6 +152,7 @@ class SkillManager:
     def detect_keywords(self, skill_name, text):
         """
         Detect keywords from product text that exist in references
+        Uses word boundary detection for more precise matching
         
         Args:
             skill_name: Name of the skill
@@ -164,12 +166,33 @@ class SkillManager:
             return []
         
         detected = []
-        text_lower = text.lower()
         
-        # キーワード名（ファイル名）で部分一致検索
+        # キーワード名（ファイル名）で単語境界を考慮した検索
         for keyword_name in skill['references'].keys():
-            if keyword_name.lower() in text_lower:
-                detected.append(keyword_name)
+            # キーワードを正規表現用にエスケープ
+            escaped_keyword = re.escape(keyword_name)
+            
+            # 日本語と英語の両方に対応したパターン
+            # 英語: \bで単語境界をチェック
+            # 日本語: 前後が英数字でないことを確認
+            patterns = [
+                # 英語キーワード用（単語境界\bを使用）
+                rf'\b{escaped_keyword}\b',
+                # 日本語キーワード用（前後が英数字以外）
+                rf'(?<![a-zA-Z0-9]){escaped_keyword}(?![a-zA-Z0-9])',
+                # シンプルな部分一致（フォールバック）
+                escaped_keyword
+            ]
+            
+            # いずれかのパターンにマッチすれば検出
+            for pattern in patterns:
+                try:
+                    if re.search(pattern, text, re.IGNORECASE):
+                        detected.append(keyword_name)
+                        break  # このキーワードは検出済み
+                except re.error:
+                    # 正規表現エラーの場合は次のパターンを試す
+                    continue
         
         return detected
     

@@ -308,10 +308,10 @@ def check_excel():
                 
                 # 検出されたキーワード（references/*.mdファイル）をログ出力
                 if detected_keywords:
-                    logger.debug(f"行 {idx + 1}: 検出されたキーワード数 = {len(detected_keywords)}")
-                    logger.debug(f"  → 使用するreferencesファイル: {', '.join(sorted(detected_keywords))}")
+                    logger.info(f"行 {idx + 1}: 検出されたキーワード数 = {len(detected_keywords)}")
+                    logger.info(f"  → 使用するreferencesファイル: {', '.join(sorted(detected_keywords))}")
                 else:
-                    logger.debug(f"行 {idx + 1}: キーワード検出なし（一般的なチェックのみ実施）")
+                    logger.info(f"行 {idx + 1}: キーワード検出なし（一般的なチェックのみ実施）")
                 
                 # 検出されたキーワードに基づいて動的にsystem_promptを構築
                 system_prompt = skill_manager.build_dynamic_system_prompt(skill_name, detected_keywords)
