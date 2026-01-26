@@ -148,6 +148,72 @@ class SkillManager:
         
         return "\n".join(prompt_parts)
     
+    def detect_keywords(self, skill_name, text):
+        """
+        Detect keywords from product text that exist in references
+        
+        Args:
+            skill_name: Name of the skill
+            text: Product text to check for keywords
+            
+        Returns:
+            List of detected keyword names
+        """
+        skill = self.skills.get(skill_name)
+        if not skill or not skill['references']:
+            return []
+        
+        detected = []
+        text_lower = text.lower()
+        
+        # キーワード名（ファイル名）で部分一致検索
+        for keyword_name in skill['references'].keys():
+            if keyword_name.lower() in text_lower:
+                detected.append(keyword_name)
+        
+        return detected
+    
+    def build_dynamic_system_prompt(self, skill_name, detected_keywords):
+        """
+        Build a system prompt with only detected keywords' references
+        
+        Args:
+            skill_name: Name of the skill to build prompt for
+            detected_keywords: List of detected keyword names
+            
+        Returns:
+            String containing the system prompt with only relevant references
+        """
+        skill = self.skills.get(skill_name)
+        if not skill:
+            raise ValueError(f"Skill not found: {skill_name}")
+        
+        # Start with the main skill content
+        prompt_parts = [skill['content']]
+        
+        # Add only detected keywords' references
+        if detected_keywords and skill['references']:
+            prompt_parts.append("\n\n## チェック用キーワード参照\n")
+            
+            # Add list of detected keywords
+            keyword_list = "以下のキーワードが検出されました:\n"
+            for keyword_name in sorted(detected_keywords):
+                keyword_list += f"- {keyword_name}\n"
+            prompt_parts.append(keyword_list)
+            
+            # Add only detected keywords' reference content
+            prompt_parts.append("\n## 各キーワードの詳細ルール\n")
+            for keyword_name in sorted(detected_keywords):
+                if keyword_name in skill['references']:
+                    prompt_parts.append(f"\n### {keyword_name}\n")
+                    prompt_parts.append(skill['references'][keyword_name])
+        else:
+            # キーワードが検出されなかった場合の注記
+            prompt_parts.append("\n\n## 注意\n")
+            prompt_parts.append("商品テキストから該当するキーワードが検出されませんでしたが、一般的な薬機法・景表法の観点からチェックしてください。")
+        
+        return "\n".join(prompt_parts)
+    
     def get_skill_by_name(self, skill_name):
         """Get a skill by name"""
         return self.skills.get(skill_name)

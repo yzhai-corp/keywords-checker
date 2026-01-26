@@ -54,6 +54,10 @@ os.environ["OPENAI_API_KEY"] = os.getenv('OPENAI_API_KEY', 'sk-xxxxxx')
 LITELLM_API_BASE = os.getenv('LITELLM_API_BASE', 'https://askul-gpt.askul-it.com/v1')
 LITELLM_MODEL = os.getenv('LITELLM_MODEL', 'gpt-5-mini')
 
+# LiteLLMのリトライ設定（エラー時のリトライ回数を制限）
+litellm.num_retries = 2  # デフォルト3回から2回に減らす
+litellm.request_timeout = 120  # タイムアウトを120秒に設定
+
 # Initialize Skill Manager
 SKILLS_DIR = Path(__file__).parent / "skills"
 skill_manager = SkillManager(SKILLS_DIR)
@@ -68,15 +72,33 @@ def build_product_message(row):
         row: Pandas Series containing product data
         
     Returns:
-        String containing formatted product information
+        Tuple: (product_message, has_check_data)
+        - product_message: String containing formatted product information
+        - has_check_data: Boolean indicating if there's data to check (other than product name)
     """
+    # チェック対象列（商品名以外）
+    check_columns = [
+        '*変更前_商品の特徴BtoB',
+        '*変更前_MDおすすめコメントBtoB',
+        '*変更前_短いキャッチコピーBtoB',
+        '*変更前_キャッチコピーBtoC',
+        '*変更前_商品の特徴BtoC'
+    ]
+    
     message_parts = []
+    has_check_data = False
     
-    for column, value in row.items():
-        if pd.notna(value) and value != '':
-            message_parts.append(f"{column}: {value}")
+    # 商品名を最初に追加
+    if '*商品名' in row and pd.notna(row['*商品名']) and row['*商品名'] != '':
+        message_parts.append(f"商品名: {row['*商品名']}")
     
-    return "\n".join(message_parts)
+    # チェック対象列を追加
+    for column in check_columns:
+        if column in row and pd.notna(row[column]) and row[column] != '':
+            message_parts.append(f"{column}: {row[column]}")
+            has_check_data = True
+    
+    return "\n".join(message_parts), has_check_data
 
 
 def extract_conclusion(result_text):
@@ -224,15 +246,32 @@ def check_excel():
         
         # Read Excel file - pandas will auto-detect the format
         try:
-            df = pd.read_excel(file)
+            # シート「チェック対象」を読み込み（全列を文字列として読み込み、元の型を保持）
+            df = pd.read_excel(file, sheet_name='チェック対象', dtype=str)
+        except ValueError as e:
+            # シートが存在しない場合
+            if 'Worksheet' in str(e) or 'チェック対象' in str(e):
+                return jsonify({'error': 'シート「チェック対象」が見つかりません。Excelファイルに「チェック対象」という名前のシートが存在することを確認してください。'}), 400
+            raise
         except Exception as e:
             return jsonify({'error': f'Failed to read Excel file: {str(e)}'}), 400
         
         if df.empty:
             return jsonify({'error': 'Excel file is empty'}), 400
         
-        # Build system prompt once
-        system_prompt = skill_manager.build_system_prompt(skill_name)
+        # 必須列のチェック
+        required_columns = ['*商品名']
+        check_columns = [
+            '*変更前_商品の特徴BtoB',
+            '*変更前_MDおすすめコメントBtoB',
+            '*変更前_短いキャッチコピーBtoB',
+            '*変更前_キャッチコピーBtoC',
+            '*変更前_商品の特徴BtoC'
+        ]
+        
+        # 商品名列の存在チェック
+        if '*商品名' not in df.columns:
+            return jsonify({'error': '「*商品名」列が見つかりません。シート「チェック対象」に「*商品名」列が必要です。'}), 400
         
         # Process each row
         results = []
@@ -248,7 +287,7 @@ def check_excel():
                     logger.info(f"進捗: {idx + 1}/{total_rows} 行処理中...")
                 
                 # Build product message from row
-                product_message = build_product_message(row)
+                product_message, has_check_data = build_product_message(row)
                 
                 # Skip empty rows
                 if not product_message or product_message.strip() == '':
@@ -256,6 +295,26 @@ def check_excel():
                     results.append("(空行)")
                     conclusions.append("SKIPPED")
                     continue
+                
+                # チェックデータが存在しない場合（商品名のみの場合）
+                if not has_check_data:
+                    logger.warning(f"行 {idx + 1} はチェックデータなし（商品名のみ）")
+                    results.append("チェックデータが存在しません（商品名以外の列にデータがありません）")
+                    conclusions.append("NO_DATA")
+                    continue
+                
+                # 商品テキストからキーワードを検出
+                detected_keywords = skill_manager.detect_keywords(skill_name, product_message)
+                
+                # 検出されたキーワード（references/*.mdファイル）をログ出力
+                if detected_keywords:
+                    logger.debug(f"行 {idx + 1}: 検出されたキーワード数 = {len(detected_keywords)}")
+                    logger.debug(f"  → 使用するreferencesファイル: {', '.join(sorted(detected_keywords))}")
+                else:
+                    logger.debug(f"行 {idx + 1}: キーワード検出なし（一般的なチェックのみ実施）")
+                
+                # 検出されたキーワードに基づいて動的にsystem_promptを構築
+                system_prompt = skill_manager.build_dynamic_system_prompt(skill_name, detected_keywords)
                 
                 # Call LiteLLM API
                 response = litellm.completion(
@@ -288,15 +347,21 @@ def check_excel():
                 conclusions.append(conclusion)
                 
             except Exception as e:
-                logger.error(f"行 {idx + 1} でエラー: {str(e)}", exc_info=True)
-                results.append(f"エラー: {str(e)}")
+                error_message = str(e)
+                logger.error(f"行 {idx + 1} でエラー: {error_message}", exc_info=True)
+                
+                # リトライエラーの場合は特別に記録
+                if 'retry' in error_message.lower() or 'timeout' in error_message.lower():
+                    logger.warning(f"行 {idx + 1}: LLM APIリトライ/タイムアウトエラー。商品情報: {product_message[:100]}...")
+                
+                results.append(f"エラー: {error_message}")
                 conclusions.append("ERROR")
         
         logger.info(f"✅ 処理完了: {total_rows}行")
         
-        # Add results to dataframe
-        df['チェック結果'] = results
-        df['結論'] = conclusions
+        # Add results to dataframe (文字列型として明示的に設定)
+        df['チェック結果'] = pd.Series(results, dtype=str)
+        df['結論'] = pd.Series(conclusions, dtype=str)
         
         # Create Excel file in memory
         output = io.BytesIO()
@@ -325,4 +390,9 @@ if __name__ == '__main__':
     
     # Run server
     logger.info("Starting Flask server on http://0.0.0.0:5001")
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    
+    # デバッグモード（環境変数で制御、本番環境ではFalseにする）
+    debug_mode = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
+    # use_reloader=Falseにするとファイル変更時の自動再起動を無効化
+    app.run(host='0.0.0.0', port=5001, debug=debug_mode, use_reloader=False)
