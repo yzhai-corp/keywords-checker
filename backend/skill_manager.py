@@ -4,8 +4,11 @@ Loads skill definitions and reference files from the skills directory
 """
 
 import os
+import logging
 import yaml
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class SkillManager:
@@ -79,7 +82,7 @@ class SkillManager:
             return skill_data
             
         except Exception as e:
-            print(f"Error loading skill file {skill_file_path}: {e}")
+            logger.error(f"Error loading skill file {skill_file_path}: {e}", exc_info=True)
             return None
     
     def load_references(self, skill_dir):
@@ -106,7 +109,7 @@ class SkillManager:
                     ref_name = ref_file.stem
                     references[ref_name] = content
             except Exception as e:
-                print(f"Error loading reference file {ref_file}: {e}")
+                logger.error(f"Error loading reference file {ref_file}: {e}", exc_info=True)
         
         return references
     

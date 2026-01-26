@@ -5,7 +5,9 @@ Provides API endpoints for product copy checking with Excel support
 
 import os
 import io
+import logging
 from pathlib import Path
+from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -15,6 +17,27 @@ from skill_manager import SkillManager
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+log_dir = Path(__file__).parent / "logs"
+log_dir.mkdir(exist_ok=True)
+
+log_filename = log_dir / f"app_{datetime.now().strftime('%Y%m%d')}.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_filename, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("=" * 60)
+logger.info("Keywords Checker Backend Server Starting...")
+logger.info(f"Log file: {log_filename}")
+logger.info("=" * 60)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -190,8 +213,20 @@ def check_excel():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Read Excel file
-        df = pd.read_excel(file)
+        # Check file extension
+        allowed_extensions = ['.xlsx', '.xls', '.xlsm']
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        
+        if file_ext not in allowed_extensions:
+            return jsonify({
+                'error': f'Unsupported file format: {file_ext}. Allowed formats: .xlsx, .xls, .xlsm'
+            }), 400
+        
+        # Read Excel file - pandas will auto-detect the format
+        try:
+            df = pd.read_excel(file)
+        except Exception as e:
+            return jsonify({'error': f'Failed to read Excel file: {str(e)}'}), 400
         
         if df.empty:
             return jsonify({'error': 'Excel file is empty'}), 400
@@ -204,16 +239,23 @@ def check_excel():
         conclusions = []
         total_rows = len(df)
         
-        print(f"\n📊 Excel一括チェック開始: {total_rows}行")
+        logger.info(f"📊 Excel一括チェック開始: {total_rows}行 (ファイル: {file.filename})")
         
         for idx, row in df.iterrows():
             try:
                 # Progress logging
                 if (idx + 1) % 100 == 0 or idx == 0:
-                    print(f"進捗: {idx + 1}/{total_rows} 行処理中...")
+                    logger.info(f"進捗: {idx + 1}/{total_rows} 行処理中...")
                 
                 # Build product message from row
                 product_message = build_product_message(row)
+                
+                # Skip empty rows
+                if not product_message or product_message.strip() == '':
+                    logger.warning(f"行 {idx + 1} はスキップ（空行）")
+                    results.append("(空行)")
+                    conclusions.append("SKIPPED")
+                    continue
                 
                 # Call LiteLLM API
                 response = litellm.completion(
@@ -236,15 +278,21 @@ def check_excel():
                 result_text = response.choices[0].message.content
                 conclusion = extract_conclusion(result_text)
                 
+                # Log if conclusion is UNKNOWN
+                if conclusion == "UNKNOWN":
+                    logger.warning(f"行 {idx + 1} で結論が不明 (UNKNOWN)")
+                    logger.debug(f"商品情報: {product_message[:100]}...")
+                    logger.debug(f"LLM応答の一部: {result_text[:200]}...")
+                
                 results.append(result_text)
                 conclusions.append(conclusion)
                 
             except Exception as e:
-                print(f"⚠️  行 {idx + 1} でエラー: {str(e)}")
+                logger.error(f"行 {idx + 1} でエラー: {str(e)}", exc_info=True)
                 results.append(f"エラー: {str(e)}")
                 conclusions.append("ERROR")
         
-        print(f"✅ 処理完了: {total_rows}行")
+        logger.info(f"✅ 処理完了: {total_rows}行")
         
         # Add results to dataframe
         df['チェック結果'] = results
@@ -270,10 +318,11 @@ def check_excel():
 
 
 if __name__ == '__main__':
-    # Print loaded skills
-    print("Loaded skills:")
+    # Log loaded skills
+    logger.info("Loaded skills:")
     for skill in skill_manager.list_skills():
-        print(f"  - {skill['name']}: {skill['description']}")
+        logger.info(f"  - {skill['name']}: {skill['description']}")
     
     # Run server
+    logger.info("Starting Flask server on http://0.0.0.0:5001")
     app.run(host='0.0.0.0', port=5001, debug=True)
