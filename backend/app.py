@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 import litellm
 import pandas as pd
 from skill_manager import SkillManager
+from s3_manager import S3Manager
+from redis_cache_manager import RedisCacheManager
 
 # Load environment variables
 load_dotenv()
@@ -40,7 +42,14 @@ logger.info(f"Log file: {log_filename}")
 logger.info("=" * 60)
 
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(__name__, static_folder='../frontend', static_url_path='')
+
+# Serve frontend
+@app.route('/')
+def serve_frontend():
+    """Serve the frontend index.html"""
+    return app.send_static_file('index.html')
+
 CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:8080", "http://127.0.0.1:8080"],
@@ -62,6 +71,65 @@ litellm.request_timeout = 120  # タイムアウトを120秒に設定
 SKILLS_DIR = Path(__file__).parent / "skills"
 skill_manager = SkillManager(SKILLS_DIR)
 skill_manager.load_all_skills()
+
+# Initialize S3 Manager (optional, only if bucket names are set)
+s3_manager = None
+if os.getenv('EXCEL_BUCKET_NAME') or os.getenv('S3_BUCKET_NAME'):
+    try:
+        s3_manager = S3Manager()
+        logger.info(f"S3 Manager initialized - Excel: {os.getenv('EXCEL_BUCKET_NAME')}, Skills: {os.getenv('SKILLS_BUCKET_NAME')}")
+    except Exception as e:
+        logger.warning(f"S3 Manager initialization failed: {e}")
+
+# Initialize Redis Cache Manager
+redis_cache = None
+if os.getenv('REDIS_HOST'):
+    try:
+        redis_cache = RedisCacheManager(ttl=86400)  # 24 hour TTL for skills
+        logger.info(f"Redis Cache Manager initialized: {os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT', 6379)}")
+    except Exception as e:
+        logger.warning(f"Redis Cache Manager initialization failed: {e}")
+
+
+def get_skill_file_with_cache(file_key):
+    """
+    Get skill file from cache or S3
+    
+    Args:
+        file_key: S3 key for skill file
+        
+    Returns:
+        str: File content or None
+    """
+    # Try cache first
+    if redis_cache:
+        cached_content = redis_cache.get_skill_file(file_key)
+        if cached_content:
+            logger.debug(f"Skill file from cache: {file_key}")
+            return cached_content
+    
+    # Load from S3
+    if s3_manager and s3_manager.skills_bucket_name:
+        try:
+            content = s3_manager.get_skill_file(file_key)
+            
+            # Store in cache
+            if redis_cache and content:
+                redis_cache.set_skill_file(file_key, content)
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error loading skill file from S3: {e}")
+            return None
+    
+    # Fallback to local file
+    local_path = SKILLS_DIR / file_key
+    if local_path.exists():
+        logger.debug(f"Skill file from local: {file_key}")
+        return local_path.read_text(encoding='utf-8')
+    
+    return None
 
 
 def build_product_message(row):
@@ -379,6 +447,196 @@ def check_excel():
         )
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/check-excel-s3', methods=['POST'])
+def check_excel_s3():
+    """
+    Check products from the latest Excel file in S3
+    
+    Request JSON (optional):
+        {
+            "skill_name": "商品コピーチェック",
+            "file_key": "input/specific_file.xlsx"  # Optional: specify a file
+        }
+        
+    Response JSON:
+        {
+            "status": "success",
+            "input_file": "input/file.xlsx",
+            "output_file": "output/file_checked_20260127_123456.xlsx",
+            "rows_processed": 100,
+            "download_url": "https://..."
+        }
+    """
+    if not s3_manager:
+        return jsonify({'error': 'S3 is not configured. Please set S3_BUCKET_NAME environment variable.'}), 503
+    
+    try:
+        data = request.json or {}
+        skill_name = data.get('skill_name', '商品コピーチェック')
+        specified_file_key = data.get('file_key')
+        
+        # Get file from S3
+        if specified_file_key:
+            logger.info(f"Processing specified file: {specified_file_key}")
+            file_obj = s3_manager.s3_client.get_object(
+                Bucket=s3_manager.bucket_name,
+                Key=specified_file_key
+            )
+            file_stream = file_obj['Body'].read()
+            file_key = specified_file_key
+        else:
+            logger.info("Getting latest Excel file from S3...")
+            file_key, file_stream = s3_manager.get_latest_excel_file()
+            
+            if not file_key:
+                return jsonify({'error': 'No Excel files found in S3'}), 404
+        
+        logger.info(f"Processing file: {file_key}")
+        
+        # Process Excel file (same logic as check_excel endpoint)
+        # Read Excel file
+        try:
+            df = pd.read_excel(io.BytesIO(file_stream), sheet_name='チェック対象', dtype=str)
+        except ValueError as e:
+            if 'Worksheet' in str(e) or 'チェック対象' in str(e):
+                return jsonify({'error': 'シート「チェック対象」が見つかりません。'}), 400
+            raise
+        except Exception as e:
+            return jsonify({'error': f'Failed to read Excel file: {str(e)}'}), 400
+        
+        if df.empty:
+            return jsonify({'error': 'Excel file is empty'}), 400
+        
+        # Check required columns
+        if '*商品名' not in df.columns:
+            return jsonify({'error': '「*商品名」列が見つかりません。'}), 400
+        
+        # Process each row (same as check_excel)
+        from app import build_product_message, extract_conclusion
+        
+        results = []
+        conclusions = []
+        total_rows = len(df)
+        
+        logger.info(f"📊 S3 Excel一括チェック開始: {total_rows}行 (ファイル: {file_key})")
+        
+        for idx, row in df.iterrows():
+            try:
+                if (idx + 1) % 100 == 0 or idx == 0:
+                    logger.info(f"進捗: {idx + 1}/{total_rows} 行処理中...")
+                
+                product_message, has_check_data = build_product_message(row)
+                
+                if not product_message or product_message.strip() == '':
+                    logger.warning(f"行 {idx + 1} はスキップ（空行）")
+                    results.append("(空行)")
+                    conclusions.append("SKIPPED")
+                    continue
+                
+                if not has_check_data:
+                    logger.warning(f"行 {idx + 1} はチェックデータなし（商品名のみ）")
+                    results.append("チェックデータが存在しません（商品名以外の列にデータがありません）")
+                    conclusions.append("NO_DATA")
+                    continue
+                
+                detected_keywords = skill_manager.detect_keywords(skill_name, product_message)
+                
+                if detected_keywords:
+                    logger.info(f"行 {idx + 1}: 検出されたキーワード数 = {len(detected_keywords)}")
+                    logger.info(f"  → 使用するreferencesファイル: {', '.join(sorted(detected_keywords))}")
+                else:
+                    logger.info(f"行 {idx + 1}: キーワード検出なし（一般的なチェックのみ実施）")
+                
+                system_prompt = skill_manager.build_dynamic_system_prompt(skill_name, detected_keywords)
+                
+                response = litellm.completion(
+                    model=LITELLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": product_message}
+                    ],
+                    api_base=LITELLM_API_BASE,
+                    max_tokens=4096,
+                    timeout=120
+                )
+                
+                result_text = response.choices[0].message.content
+                conclusion = extract_conclusion(result_text)
+                
+                if conclusion == "UNKNOWN":
+                    logger.warning(f"行 {idx + 1} で結論が不明 (UNKNOWN)")
+                
+                results.append(result_text)
+                conclusions.append(conclusion)
+                
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"行 {idx + 1} でエラー: {error_message}", exc_info=True)
+                results.append(f"エラー: {error_message}")
+                conclusions.append("ERROR")
+        
+        logger.info(f"✅ 処理完了: {total_rows}行")
+        
+        # Add results to dataframe
+        df['チェック結果'] = pd.Series(results, dtype=str)
+        df['結論'] = pd.Series(conclusions, dtype=str)
+        
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='チェック結果')
+        
+        output.seek(0)
+        file_content = output.getvalue()
+        
+        # Upload result to S3
+        output_key = s3_manager.upload_result_file(file_content, os.path.basename(file_key))
+        
+        # Generate presigned URL for download
+        download_url = s3_manager.get_file_url(output_key, expiration=3600)
+        
+        return jsonify({
+            'status': 'success',
+            'input_file': file_key,
+            'output_file': output_key,
+            'rows_processed': total_rows,
+            'download_url': download_url,
+            'bucket': s3_manager.bucket_name
+        })
+        
+    except Exception as e:
+        logger.error(f"S3処理エラー: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/s3/files', methods=['GET'])
+def list_s3_files():
+    """
+    List all Excel files in S3 input directory
+    
+    Response JSON:
+        {
+            "files": [
+                {
+                    "key": "input/file.xlsx",
+                    "filename": "file.xlsx",
+                    "size": 12345,
+                    "last_modified": "2026-01-27T12:34:56"
+                }
+            ]
+        }
+    """
+    if not s3_manager:
+        return jsonify({'error': 'S3 is not configured'}), 503
+    
+    try:
+        files = s3_manager.list_input_files()
+        return jsonify({'files': files})
+    except Exception as e:
+        logger.error(f"S3ファイルリスト取得エラー: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

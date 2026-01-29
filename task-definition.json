@@ -1,0 +1,61 @@
+{
+  "family": "keywords-checker-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::{AWS_ACCOUNT_ID}:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::{AWS_ACCOUNT_ID}:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "keywords-checker",
+      "image": "{AWS_ACCOUNT_ID}.dkr.ecr.{AWS_REGION}.amazonaws.com/keywords-checker:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 5001,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "FLASK_DEBUG",
+          "value": "False"
+        },
+        {
+          "name": "LITELLM_MODEL",
+          "value": "gpt-5-mini"
+        },
+        {
+          "name": "LITELLM_API_BASE",
+          "value": "https://askul-gpt.askul-it.com/v1"
+        },
+        {
+          "name": "S3_BUCKET_NAME",
+          "value": "keywords-checker-files"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:{AWS_REGION}:{AWS_ACCOUNT_ID}:secret:keywords-checker/api-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/keywords-checker",
+          "awslogs-region": "{AWS_REGION}",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5001/api/health')\" || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
