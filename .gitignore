@@ -31,6 +31,14 @@ venv/
 ENV/
 env/
 
+# Lambda build artifacts
+lambda/build/
+lambda/layer/
+lambda/lambda1/package/
+lambda/lambda2/package/
+lambda/*.zip
+*.zip
+
 # IDE
 .vscode/
 .idea/
