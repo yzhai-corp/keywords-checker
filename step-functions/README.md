@@ -6,6 +6,55 @@
 
 ## アーキテクチャ図
 
+### AWSアーキテクチャ概要
+
+```mermaid
+graph TB
+    subgraph "S3 Bucket"
+        S3Input[("S3: input/")]
+        S3Results[("S3: results/")]
+        S3Output[("S3: output/")]
+    end
+    
+    subgraph "Event Processing"
+        EB[EventBridge Rule]
+    end
+    
+    subgraph "Step Functions State Machine"
+        SF[Step Functions]
+        Splitter[Lambda: Splitter<br/>2048MB / 5min]
+        MapState{Map State<br/>MaxConcurrency: 500}
+        Processor[Lambda: Processor<br/>1024MB / 2min<br/>×500 Parallel]
+        Combiner[Lambda: Combiner<br/>2048MB / 10min]
+    end
+    
+    subgraph "Lambda Layer"
+        Layer[(Skills Layer<br/>SKILL.md + 227 References)]
+    end
+    
+    User((User)) -->|Upload .xlsx| S3Input
+    S3Input -->|S3 Event Notification| EB
+    EB -->|Trigger| SF
+    SF --> Splitter
+    Splitter -->|Read Excel| S3Input
+    Splitter -->|Row Array| MapState
+    MapState -->|Distribute Rows| Processor
+    Layer -.->|Attached| Processor
+    Processor -->|Save Results| S3Results
+    MapState -->|Collect Results| Combiner
+    Combiner -->|Read JSON| S3Results
+    Combiner -->|Write Excel| S3Output
+    S3Output -->|Download| User
+    
+    style S3Input fill:#ff9900
+    style S3Results fill:#ff9900
+    style S3Output fill:#ff9900
+    style EB fill:#e7157b
+    style SF fill:#c925d1
+    style Processor fill:#ff9900,stroke:#333,stroke-width:3px
+    style Layer fill:#8c4fff
+```
+
 ### 推奨構成: EventBridge経由 ✅
 
 ```
