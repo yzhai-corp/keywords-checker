@@ -39,6 +39,14 @@ lambda/lambda2/package/
 lambda/*.zip
 *.zip
 
+# Step Functions build artifacts
+step-functions/build/
+step-functions/splitter/package/
+step-functions/processor/package/
+step-functions/combiner/package/
+step-functions/*.zip
+step-functions/*.log
+
 # IDE
 .vscode/
 .idea/
