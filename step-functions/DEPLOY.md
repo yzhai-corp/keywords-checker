@@ -268,9 +268,25 @@ aws lambda publish-layer-version \
 
 ## Lambda関数の作成
 
+**重要:** Lambda関数のZIPファイルが50MBを超える場合、S3経由でアップロードする必要があります。
+
+### 事前準備: ZIPファイルをS3にアップロード
+
+```bash
+# S3バケットを作成（まだ作成していない場合）
+aws s3 mb s3://YOUR-DEPLOYMENT-BUCKET
+
+# ZIPファイルをS3にアップロード
+cd step-functions/build
+aws s3 cp skills-layer.zip s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/
+aws s3 cp splitter.zip s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/
+aws s3 cp processor.zip s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/
+aws s3 cp combiner.zip s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/
+```
+
 ### Step 3: Splitter Lambda関数の作成
 
-#### AWS Consoleでの作成
+#### AWS Consoleでの作成（S3経由）
 
 1. **Lambda Console → 関数の作成**
 2. **一から作成**を選択
@@ -282,9 +298,10 @@ aws lambda publish-layer-version \
 
 4. **関数の作成** をクリック
 
-5. **コードのアップロード:**
-   - 「アップロード元」→「.zipファイル」
-   - `build/splitter.zip` を選択
+5. **コードのアップロード（S3経由）:**
+   - 「アップロード元」→「Amazon S3の場所」を選択
+   - Amazon S3 リンク URL: `https://s3.amazonaws.com/YOUR-DEPLOYMENT-BUCKET/lambda-code/splitter.zip`
+   - または `s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/splitter.zip`
    - 「保存」をクリック
 
 6. **設定タブ → 一般設定 → 編集:**
@@ -297,9 +314,23 @@ aws lambda publish-layer-version \
 
 8. **保存**
 
+#### AWS CLIでの作成（S3経由）
+
+```bash
+aws lambda create-function \
+  --function-name keywords-checker-splitter \
+  --runtime python3.13 \
+  --role arn:aws:iam::ACCOUNT_ID:role/keywords-checker-splitter-role \
+  --handler lambda_function.lambda_handler \
+  --code S3Bucket=YOUR-DEPLOYMENT-BUCKET,S3Key=lambda-code/splitter.zip \
+  --timeout 300 \
+  --memory-size 2048 \
+  --environment "Variables={RESULTS_BUCKET=YOUR-BUCKET}"
+```
+
 ### Step 4: Processor Lambda関数の作成
 
-#### AWS Consoleでの作成
+#### AWS Consoleでの作成（S3経由）
 
 1. **Lambda Console → 関数の作成**
 2. **一から作成**を選択
@@ -311,9 +342,9 @@ aws lambda publish-layer-version \
 
 4. **関数の作成** をクリック
 
-5. **コードのアップロード:**
-   - 「アップロード元」→「.zipファイル」
-   - `build/processor.zip` を選択
+5. **コードのアップロード（S3経由）:**
+   - 「アップロード元」→「Amazon S3の場所」を選択
+   - Amazon S3 リンク URL: `s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/processor.zip`
    - 「保存」をクリック
 
 6. **設定タブ → 一般設定 → 編集:**
@@ -345,7 +376,7 @@ aws lambda publish-layer-version \
 
 10. **保存**
 
-#### AWS CLIでの作成
+#### AWS CLIでの作成（S3経由）
 
 ```bash
 # Lambda関数を作成
@@ -354,7 +385,7 @@ aws lambda create-function \
   --runtime python3.13 \
   --role arn:aws:iam::ACCOUNT_ID:role/keywords-checker-processor-role \
   --handler lambda_function.lambda_handler \
-  --zip-file fileb://build/processor.zip \
+  --code S3Bucket=YOUR-DEPLOYMENT-BUCKET,S3Key=lambda-code/processor.zip \
   --timeout 120 \
   --memory-size 1024 \
   --environment "Variables={RESULTS_BUCKET=YOUR-BUCKET,LITELLM_MODE=stub,LITELLM_API_BASE=https://askul-gpt.askul-it.com/v1,LITELLM_MODEL=gpt-5-mini,OPENAI_API_KEY=sk-xxxxxx}" \
@@ -368,7 +399,7 @@ aws lambda put-function-concurrency \
 
 ### Step 5: Combiner Lambda関数の作成
 
-#### AWS Consoleでの作成
+#### AWS Consoleでの作成（S3経由）
 
 1. **Lambda Console → 関数の作成**
 2. **一から作成**を選択
@@ -380,9 +411,9 @@ aws lambda put-function-concurrency \
 
 4. **関数の作成** をクリック
 
-5. **コードのアップロード:**
-   - 「アップロード元」→「.zipファイル」
-   - `build/combiner.zip` を選択
+5. **コードのアップロード（S3経由）:**
+   - 「アップロード元」→「Amazon S3の場所」を選択
+   - Amazon S3 リンク URL: `s3://YOUR-DEPLOYMENT-BUCKET/lambda-code/combiner.zip`
    - 「保存」をクリック
 
 6. **設定タブ → 一般設定 → 編集:**
@@ -395,6 +426,20 @@ aws lambda put-function-concurrency \
 
 8. **保存**
 
+#### AWS CLIでの作成（S3経由）
+
+```bash
+aws lambda create-function \
+  --function-name keywords-checker-combiner \
+  --runtime python3.13 \
+  --role arn:aws:iam::ACCOUNT_ID:role/keywords-checker-combiner-role \
+  --handler lambda_function.lambda_handler \
+  --code S3Bucket=YOUR-DEPLOYMENT-BUCKET,S3Key=lambda-code/combiner.zip \
+  --timeout 600 \
+  --memory-size 2048 \
+  --environment "Variables={RESULTS_BUCKET=YOUR-BUCKET}"
+```
+
 ---
 
 ## Step Functionsの作成
@@ -405,26 +450,30 @@ aws lambda put-function-concurrency \
 
 1. **Step Functions Console → ステートマシン → ステートマシンの作成**
 
-2. **テンプレートの選択:**
-   - 「空白」を選択
+2. **作成方法を選択:**
+   - **「自分で作成する」を選択** ✅
 
-3. **ステートマシンの名前:**
-   - `keywords-checker-state-machine`
+3. **定義方法を選択:**
+   - 「コードでワークフローを記述」を選択
+   - タイプ: **「標準」**
 
 4. **定義:**
    - `state-machine.json` の内容をコピー
    - `ACCOUNT_ID` を実際のAWSアカウントIDに置き換え
    - 定義エディターに貼り付け
 
-5. **実行ロール:**
+5. **ステートマシンの名前:**
+   - `keywords-checker-state-machine`
+
+6. **実行ロール:**
    - 「既存のロールを選択」
    - `keywords-checker-stepfunctions-role` を選択
 
-6. **ロギング設定（オプション）:**
+7. **ロギング設定（オプション）:**
    - ログレベル: `ALL`
    - CloudWatch Logsロググループを作成
 
-7. **ステートマシンの作成** をクリック
+8. **ステートマシンの作成** をクリック
 
 ---
 
