@@ -29,7 +29,73 @@ Lambda2 (keywords-checker-lambda2) ×複数
 - AWS CLI (設定済み)
 - zip コマンド
 
-### 2. ディレクトリ構成
+### 2. ネットワーク要件
+
+**重要**: Lambda2は社内APIエンドポイント (`askul-gpt.askul-it.com`) にアクセスするため、以下のネットワーク設定が必要です：
+
+#### 必須要件
+- Lambda2をVPCに配置
+- 社内ネットワークへの接続（以下のいずれか）：
+  - AWS Direct Connect
+  - Site-to-Site VPN
+  - Client VPN
+
+#### 前提条件の確認
+デプロイ前に以下を確認してください：
+
+1. **VPC設定**
+   - VPC ID（例: vpc-xxxxx）
+   - プライベートサブネット × 2つ以上（例: subnet-xxxxx, subnet-yyyyy）
+   - セキュリティグループ ID（例: sg-xxxxx）
+
+2. **社内ネットワーク接続**
+   - Direct ConnectまたはVPN接続が確立済み
+   - `askul-gpt.askul-it.com` への通信が許可されている
+
+3. **インターネットアクセス（外部ライブラリ用）**
+   - NATゲートウェイまたはNATインスタンス（pip installで依存関係をダウンロードする場合）
+
+### 3. VPC設定の準備（Lambda2用）
+
+Lambda2は社内API (`askul-gpt.askul-it.com`) にアクセスするため、以下の情報を事前に確認してください：
+
+#### 必要な情報
+1. **VPC ID**: 社内ネットワークに接続されているVPC
+   - 例: `vpc-0123456789abcdef0`
+   - 確認方法: VPC Console → Your VPCs
+
+2. **サブネット ID**: プライベートサブネット × 2つ以上（異なるAZ）
+   - 例: `subnet-0123456789abcdef0 (ap-northeast-1a)`
+   - 例: `subnet-0123456789abcdef1 (ap-northeast-1c)`
+   - 確認方法: VPC Console → Subnets → Type: Private
+
+3. **セキュリティグループ ID**: Lambda2用のセキュリティグループ
+   - 例: `sg-0123456789abcdef0`
+   - 必要なルール:
+     ```
+     Outbound:
+     - HTTPS (443) → 0.0.0.0/0 または社内ネットワークCIDR
+     - (オプション) All traffic → 0.0.0.0/0 (NAT Gateway経由のインターネットアクセス用)
+     ```
+   - 確認方法: EC2 Console → Security Groups
+
+4. **ルートテーブル**: サブネットのルートテーブルに社内ネットワークへのルートが設定されているか
+   - 確認方法: VPC Console → Route Tables → Routes
+   - 必要なルート例:
+     ```
+     Destination: 10.0.0.0/8 → Target: vgw-xxxxx (Virtual Private Gateway)
+     Destination: 172.16.0.0/12 → Target: tgw-xxxxx (Transit Gateway)
+     ```
+
+#### ネットワーク接続の確認
+
+社内ネットワークへの接続方法を確認してください：
+
+- **AWS Direct Connect**: VPC → Virtual Private Gateway → Direct Connect Gateway
+- **Site-to-Site VPN**: VPC → Virtual Private Gateway → Customer Gateway
+- **Transit Gateway**: VPC → Transit Gateway Attachment → 社内ネットワーク
+
+### 4. ディレクトリ構成
 
 ```
 lambda/
@@ -116,10 +182,12 @@ cd ../..
 **Lambda2の役割**: Lambda1から呼び出されてLLM APIにリクエストするだけです。
 S3やLambda呼び出しの権限は不要で、基本的な実行ロールのみで十分です。
 
+**重要**: Lambda2は社内API (`askul-gpt.askul-it.com`) にアクセスするため、VPC設定が必須です。
+
 1. Lambda → Functions → Create function
 2. 基本設定：
    - Function name: `keywords-checker-lambda2`
-   - Runtime: `Python 3.10`
+   - Runtime: `Python 3.13`
    - Architecture: `x86_64`
    - **Permissions**: デフォルトの実行ロール（自動作成される）でOK
 3. Code → Upload from → .zip file → `lambda/build/lambda2.zip`
@@ -127,16 +195,62 @@ S3やLambda呼び出しの権限は不要で、基本的な実行ロールのみ
    - Custom layers → `keywords-checker-skills-layer`
 5. Configuration → General configuration
    - Memory: `1024 MB`
-   - Timeout: `2 minutes`
+   - Timeout: `5 minutes`
 6. Configuration → Environment variables
    - `LITELLM_API_BASE`: `https://askul-gpt.askul-it.com/v1`
    - `LITELLM_MODEL`: `gpt-5-mini`
-   - `OPENAI_API_KEY`: `(API KEY)`
-7. Configuration → Concurrency
+   - `OPENAI_API_KEY`: `(実際のAPIキー)`
+
+#### VPC設定（必須）
+
+7. Configuration → VPC → Edit
+   - **VPC**: 社内ネットワークに接続されているVPCを選択（例: `vpc-xxxxx`）
+   - **Subnets**: プライベートサブネットを2つ以上選択
+     - 推奨: 異なるAZのサブネット（例: `subnet-xxxxx (ap-northeast-1a)`, `subnet-yyyyy (ap-northeast-1c)`）
+   - **Security groups**: 以下のルールを持つセキュリティグループを選択/作成
+     ```
+     Outbound Rules:
+     - Type: HTTPS (443)
+       Destination: 0.0.0.0/0 または社内ネットワークのCIDR
+       Description: Allow access to askul-gpt.askul-it.com
+     
+     - Type: All traffic
+       Destination: 0.0.0.0/0
+       Description: (Optional) For internet access via NAT Gateway
+     ```
+   - Save
+
+#### VPC設定後の確認
+
+VPC設定後、以下を確認してください：
+
+- ✅ Lambda2の実行ロールに `AWSLambdaVPCAccessExecutionRole` ポリシーが自動付与される
+- ✅ ENI (Elastic Network Interface) が作成される（数分かかる場合があります）
+- ✅ 社内API (`askul-gpt.askul-it.com`) への通信が可能
+
+#### トラブルシューティング
+
+**タイムアウトが発生する場合**:
+1. Direct ConnectまたはVPN接続が確立されているか確認
+2. セキュリティグループのアウトバウンドルールで443番ポートが許可されているか確認
+3. ルートテーブルで社内ネットワークへのルートが設定されているか確認
+4. CloudWatchログで「Network diagnostics」のログを確認：
+   ```
+   [INFO] DNS resolution successful: askul-gpt.askul-it.com -> xxx.xxx.xxx.xxx
+   [INFO] HTTPS connection successful: 200
+   ```
+   または
+   ```
+   [ERROR] DNS resolution failed: ...
+   [ERROR] HTTPS connection failed: ...
+   ```
+
+8. Configuration → Concurrency
    - Reserved concurrent executions: `100` (最大10000件を15分以内で処理するため)
 
 **Lambda2のIAMロール**（自動作成されるデフォルトロールで十分）:
-- CloudWatch Logsへの書き込み権限のみ必要
+- CloudWatch Logsへの書き込み権限
+- VPCアクセス権限（`AWSLambdaVPCAccessExecutionRole`）← VPC設定時に自動付与
 - S3アクセスやLambda呼び出しの権限は不要
 
 ### Step 6: Lambda1の作成（AWS Console）

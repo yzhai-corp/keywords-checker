@@ -233,3 +233,66 @@ Step Functions構成に切り替える場合は、以下の3つのLambda関数�
 3. **Combiner**: 結果を統合してExcelを作成
 
 実装しますか？
+
+
+## AIからの回答
+良い質問です！Lambda-to-Lambdaの構成には課題があります。より良い構成を提案させてください。 
+
+Read [](file:///Users/abi01711/workspace/keywords-checker/lambda/DEPLOY.md#1-1), lines 1 to 50
+
+Created [](file:///Users/abi01711/workspace/keywords-checker/lambda/ARCHITECTURE_COMPARISON.md)
+
+詳細な比較ドキュメントを作成しました。**要点をまとめます**：
+
+## Lambda→Lambda呼び出しの問題点
+
+❌ **15分のタイムアウトリスク**
+- Lambda1が10,000個のLambda2の完了を待つ必要がある
+- 最も遅い処理が完了するまでLambda1が待機
+
+❌ **必要な並列数: 400-500並列**
+```
+計算式：10,000行 × 30秒/行 ÷ (15分 × 60秒) = 333並列
+安全マージン込みで 400-500並列
+```
+
+❌ **エラーハンドリングが困難**
+- 一部失敗時の再処理が複雑
+
+## 推奨構成: Step Functions + Lambda ✅
+
+```
+S3 
+  ↓
+Lambda Splitter (Excelを行配列に分割)
+  ↓
+Step Functions Map State (自動並列実行)
+  ├→ Lambda Processor (LLM API) ×500並列
+  ├→ Lambda Processor (LLM API)
+  └→ Lambda Processor (LLM API)
+  ↓
+Lambda Combiner (結果統合→Excel作成)
+  ↓
+S3
+```
+
+### メリット
+
+✅ **15分制限なし**（Step Functionsは最大1年実行可能）
+✅ **自動並列管理**（Map Stateで最大10,000並列）
+✅ **視覚的モニタリング**（進捗が見える）
+✅ **優れたエラーハンドリング**（自動リトライ）
+✅ **コスト効率**（月$75程度）
+
+### 次のアクション
+
+Step Functions構成を実装しますか？必要なのは：
+
+1. Lambda Splitter（Excel分割）
+2. Lambda Processor（現Lambda2を改修）
+3. Lambda Combiner（結果統合）
+4. Step Functions定義
+
+実装しましょうか？
+
+Made changes.

@@ -52,7 +52,7 @@ mkdir -p "$LAMBDA1_PACKAGE"
 
 # 依存関係をインストール
 echo "Installing Lambda1 dependencies..."
-pip install -r "$LAMBDA1_DIR/requirements.txt" -t "$LAMBDA1_PACKAGE" --quiet
+python3 -m pip install -r "$LAMBDA1_DIR/requirements.txt" --target "$LAMBDA1_PACKAGE" --upgrade --platform manylinux2014_x86_64 --implementation cp --python-version 3.13 --only-binary=:all:
 
 # lambda_function.pyをコピー
 cp "$LAMBDA1_DIR/lambda_function.py" "$LAMBDA1_PACKAGE/"
@@ -77,7 +77,7 @@ mkdir -p "$LAMBDA2_PACKAGE"
 
 # 依存関係をインストール
 echo "Installing Lambda2 dependencies..."
-pip install -r "$LAMBDA2_DIR/requirements.txt" -t "$LAMBDA2_PACKAGE" --quiet
+python3 -m pip install -r "$LAMBDA2_DIR/requirements.txt" --target "$LAMBDA2_PACKAGE" --upgrade --platform manylinux2014_x86_64 --implementation cp --python-version 3.13 --only-binary=:all:
 
 # lambda_function.pyをコピー
 cp "$LAMBDA2_DIR/lambda_function.py" "$LAMBDA2_PACKAGE/"

@@ -85,7 +85,7 @@ def load_skill_file():
     Returns:
         str: SKILLファイルの内容
     """
-    skill_path = Path('/opt/skills/商品コピーチェック/SKILL.md')
+    skill_path = Path('/opt/python/skills/商品コピーチェック/SKILL.md')
     
     if not skill_path.exists():
         # Lambdaレイヤーにない場合はローカルパスを試す
@@ -165,7 +165,7 @@ def load_reference_files(keywords):
     reference_contents = {}
     
     for keyword in keywords:
-        ref_path = Path(f'/opt/skills/商品コピーチェック/references/{keyword}.md')
+        ref_path = Path(f'/opt/python/skills/商品コピーチェック/references/{keyword}.md')
         
         if not ref_path.exists():
             # Lambdaレイヤーにない場合はローカルパスを試す
@@ -195,6 +195,30 @@ def call_llm_api(product_message, skill_content, reference_contents):
     Returns:
         str: LLMからの応答テキスト
     """
+    # ネットワーク接続診断
+    import socket
+    import urllib.request
+    
+    logger.info(f"Network diagnostics starting...")
+    logger.info(f"API Base: {LITELLM_API_BASE}")
+    
+    # DNS解決テスト
+    try:
+        hostname = "askul-gpt.askul-it.com"
+        ip_address = socket.gethostbyname(hostname)
+        logger.info(f"DNS resolution successful: {hostname} -> {ip_address}")
+    except Exception as e:
+        logger.error(f"DNS resolution failed: {e}")
+    
+    # HTTPSアクセステスト（タイムアウト10秒）
+    try:
+        test_url = "https://askul-gpt.askul-it.com"
+        req = urllib.request.Request(test_url, method='HEAD')
+        with urllib.request.urlopen(req, timeout=10) as response:
+            logger.info(f"HTTPS connection successful: {response.status}")
+    except Exception as e:
+        logger.error(f"HTTPS connection failed: {e}")
+    
     # システムプロンプトを構築
     system_message = f"""あなたは商品コピーチェックの専門家です。
 以下のスキル定義に従って、商品情報をチェックしてください。

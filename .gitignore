@@ -49,3 +49,5 @@ lambda/*.zip
 # OS
 .DS_Store
 Thumbs.db
+lambda/build.log
+lambda/build-new.log
