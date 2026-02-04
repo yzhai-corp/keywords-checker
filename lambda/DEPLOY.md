@@ -307,9 +307,25 @@ Lambda1には以下の3つの権限が必要です：
         {
             "Effect": "Allow",
             "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": "arn:aws:s3:::askul-sandbox-01-regulation-test-bucket"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
                 "lambda:InvokeFunction"
             ],
-            "Resource": "arn:aws:lambda:ap-northeast-1:*:function:keywords-checker-lambda2"
+            "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-lambda2"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:PutLogEvents",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream"
+            ],
+            "Resource": "arn:aws:logs:*:*:*"
         }
     ]
 }
