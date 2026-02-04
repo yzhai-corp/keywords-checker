@@ -449,7 +449,181 @@ Lambda2が正しく動作するか確認：
    INFO S3 trigger: input/test.xlsx → output/result_20260203_123456_test.xlsx
    ```
 
-## トラブルシューティング
+## テスト手順（Sandbox環境）
+
+### 前提条件
+
+- Lambda2はスタブモード（LLM API呼び出しなし）で動作
+- S3 → Lambda1 → Lambda2 の処理フローを検証
+
+### Step 1: テストデータの準備
+
+#### Excelファイルの作成
+
+```bash
+cd /Users/abi01711/workspace/keywords-checker
+python3 examples/create_test_excel.py
+```
+
+このスクリプトは `examples/sample.csv` から `examples/sample.xlsx` を作成します。
+
+#### サンプルデータの内容
+
+| 商品名 | キャッチコピー | 含まれるキーワード |
+|--------|--------------|------------------|
+| 3D立体型やさしいマスク | 国内自社工場の国産高機能フィルタをダブル使用 | （なし） |
+| 健康サプリメント | ウイルス予防に効果的！ | ウイルス、免疫力 |
+| フェイスクリーム | シミが消える魔法のクリーム | シミ、シワ |
+
+### Step 2: S3へアップロード
+
+#### 方法A: AWS CLI
+
+```bash
+aws s3 cp examples/sample.xlsx s3://askul-sandbox-01-regulation-test-bucket/input/sample.xlsx
+```
+
+#### 方法B: AWS Console
+
+1. S3 Console → `askul-sandbox-01-regulation-test-bucket`
+2. `input/` フォルダを開く
+3. **Upload** → `examples/sample.xlsx` を選択
+4. Upload
+
+### Step 3: Lambda2の単体テスト
+
+Lambda2が正常に動作するか確認します。
+
+1. AWS Console → Lambda → `keywords-checker-lambda2`
+2. **Test** タブ → **Test event**
+3. 以下のJSONを入力：
+
+```json
+{
+  "row_index": 0,
+  "product_message": "商品名: 健康サプリメント ビタミンC 1000mg\nキャッチコピー: ウイルス予防に効果的！\n説明: 高濃度ビタミンCで免疫力アップ"
+}
+```
+
+4. **Test** 実行
+
+#### 期待される結果
+
+```json
+{
+  "statusCode": 200,
+  "body": "{\"result_text\": \"# 商品コピーチェック結果（スタブ版）\\n\\n...\"}"
+}
+```
+
+CloudWatchログで以下を確認：
+```
+[INFO] === STUB MODE: LLM API call is mocked ===
+[INFO] Product message: 商品名: 健康サプリメント...
+[INFO] Skill content loaded: 14682 chars
+[INFO] Reference files loaded: 2 files
+[INFO] Stub response generated: XXX chars
+```
+
+### Step 4: Lambda1の単体テスト（手動トリガー）
+
+Lambda1からLambda2を呼び出す処理を確認します。
+
+1. AWS Console → Lambda → `keywords-checker-lambda1`
+2. **Test** タブ → **Test event**
+3. 以下のJSONを入力：
+
+```json
+{
+  "input_file": "input/sample.xlsx",
+  "output_file": "output/result.xlsx"
+}
+```
+
+4. **Test** 実行
+
+#### 期待される結果
+
+```json
+{
+  "statusCode": 200,
+  "body": "{\"message\": \"Processing completed successfully\", ...}"
+}
+```
+
+CloudWatchログで以下を確認：
+```
+[INFO] Lambda1 started
+[INFO] Processing input/sample.xlsx
+[INFO] Found 3 rows to process
+[INFO] Row 0: Invoking Lambda2...
+[INFO] Row 0: Lambda2 response received
+[INFO] Row 1: Invoking Lambda2...
+[INFO] Row 1: Lambda2 response received
+[INFO] Row 2: Invoking Lambda2...
+[INFO] Row 2: Lambda2 response received
+[INFO] All rows processed successfully
+[INFO] Uploading result to s3://askul-sandbox-01-regulation-test-bucket/output/result.xlsx
+```
+
+### Step 5: S3トリガーによる自動実行テスト
+
+S3にファイルをアップロードすると自動的にLambda1が起動することを確認します。
+
+1. S3 Console → `askul-sandbox-01-regulation-test-bucket/input/`
+2. `sample.xlsx` を再度アップロード（上書きまたは別名）
+3. Lambda1が自動的に起動することを確認
+
+#### 確認方法
+
+**CloudWatch Logs**:
+```bash
+aws logs tail /aws/lambda/keywords-checker-lambda1 --follow
+```
+
+または AWS Console → CloudWatch → Log groups → `/aws/lambda/keywords-checker-lambda1`
+
+**S3の結果ファイル**:
+- `output/result.xlsx` が作成されているか確認
+- ダウンロードして内容を確認
+
+### Step 6: 結果ファイルの確認
+
+1. S3 Console → `askul-sandbox-01-regulation-test-bucket/output/`
+2. `result.xlsx` をダウンロード
+3. Excelで開いて以下を確認：
+
+#### 期待される結果
+
+| 商品名 | カタログ商品名 | ... | チェック結果 |
+|--------|--------------|-----|------------|
+| 3D立体型やさしいマスク | ... | ... | ✅ 承認 |
+| 健康サプリメント | ... | ... | ❌ 要修正（ウイルス、免疫力） |
+| フェイスクリーム | ... | ... | ❌ 要修正（シミ、シワ） |
+
+チェック結果列に、スタブレスポンス（Markdown形式）が入力されています。
+
+## トラブルシューティング（Sandbox環境）
+
+### Lambda1が起動しない
+
+- S3トリガーが正しく設定されているか確認
+- Lambda1のIAMロールにS3読み取り権限があるか確認
+- CloudWatch Logsにエラーが出ていないか確認
+
+### Lambda2でエラーが発生
+
+- Lambda Layerが正しくアタッチされているか確認
+- `/opt/python/skills/` にファイルが存在するか確認（テスト実行のログで確認）
+- IAMロールに `AWSLambdaBasicExecutionRole` があるか確認
+
+### 結果ファイルがS3に作成されない
+
+- Lambda1のIAMロールにS3書き込み権限があるか確認
+- Lambda1のタイムアウトが十分か確認（15分推奨）
+- CloudWatch Logsでエラーを確認
+
+## トラブルシューティング（一般）
 
 ### メモリ不足エラー
 

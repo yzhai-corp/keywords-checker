@@ -84,8 +84,11 @@ def lambda_handler(event, context):
                 logger.error(f"Invalid file path: {input_file}")
                 raise ValueError(f"Invalid file path: {input_file}")
             
-            # output_fileを自動生成
-            output_file = f"output/result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
+            # 拡張子を.xlsxに変更（.xlsmファイルでも.xlsxで保存）
+            base_filename = filename.rsplit('.', 1)[0]  # 拡張子を除去
+            
+            # output_fileを自動生成（必ず.xlsx）
+            output_file = f"output/result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{base_filename}.xlsx"
             
             logger.info(f"S3 trigger: {input_file} → {output_file}")
             logger.info(f"Bucket: {bucket}, Filename: {filename}")

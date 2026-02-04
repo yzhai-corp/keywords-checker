@@ -185,7 +185,7 @@ def load_reference_files(keywords):
 
 def call_llm_api(product_message, skill_content, reference_contents):
     """
-    LLM APIを呼び出し
+    LLM APIを呼び出し（スタブ版 - Sandbox環境用）
     
     Args:
         product_message: 商品情報
@@ -193,56 +193,47 @@ def call_llm_api(product_message, skill_content, reference_contents):
         reference_contents: referenceファイルの内容辞書
         
     Returns:
-        str: LLMからの応答テキスト
+        str: LLMからの応答テキスト（スタブレスポンス）
     """
-    # ネットワーク接続診断
-    import socket
-    import urllib.request
+    logger.info("=== STUB MODE: LLM API call is mocked ===")
+    logger.info(f"Product message: {product_message[:100]}...")
+    logger.info(f"Skill content loaded: {len(skill_content)} chars")
+    logger.info(f"Reference files loaded: {len(reference_contents)} files")
     
-    logger.info(f"Network diagnostics starting...")
-    logger.info(f"API Base: {LITELLM_API_BASE}")
+    # 検出されたキーワードのリスト
+    detected_keywords = list(reference_contents.keys())
     
-    # DNS解決テスト
-    try:
-        hostname = "askul-gpt.askul-it.com"
-        ip_address = socket.gethostbyname(hostname)
-        logger.info(f"DNS resolution successful: {hostname} -> {ip_address}")
-    except Exception as e:
-        logger.error(f"DNS resolution failed: {e}")
+    # チェック対象列のリスト
+    check_columns = [
+        '変更後_キャッチコピーBtoB',
+        '変更後_商品の特徴BtoB',
+        '変更後_短いキャッチコピーBtoB',
+        '変更後_MDおすすめコメントBtoB',
+        '変更後_キャッチコピーBtoC',
+        '変更後_商品の特徴BtoC',
+        '変更後_MDおすすめコメントBtoC',
+        '変更後_短いキャッチコピーBtoC'
+    ]
     
-    # HTTPSアクセステスト（タイムアウト10秒）
-    try:
-        test_url = "https://askul-gpt.askul-it.com"
-        req = urllib.request.Request(test_url, method='HEAD')
-        with urllib.request.urlopen(req, timeout=10) as response:
-            logger.info(f"HTTPS connection successful: {response.status}")
-    except Exception as e:
-        logger.error(f"HTTPS connection failed: {e}")
+    # 元のフォーマットに合わせたスタブレスポンスを生成
+    stub_response = ""
     
-    # システムプロンプトを構築
-    system_message = f"""あなたは商品コピーチェックの専門家です。
-以下のスキル定義に従って、商品情報をチェックしてください。
-
-{skill_content}
-"""
+    for col in check_columns:
+        stub_response += f"## {col}\n\n"
+        
+        if detected_keywords:
+            # キーワードが検出された場合
+            keywords_str = ", ".join(detected_keywords[:3])
+            if len(detected_keywords) > 3:
+                keywords_str += f" 他{len(detected_keywords) - 3}件"
+            
+            stub_response += f"**結論**: NG\n\n"
+            stub_response += f"検出されたキーワード: {keywords_str}\n\n"
+            stub_response += f"（スタブ応答）対象箇所の確認が必要です。\n\n"
+        else:
+            # キーワードが検出されなかった場合
+            stub_response += f"**結論**: OK\n\n"
+            stub_response += f"（スタブ応答）問題なし\n\n"
     
-    # referenceファイルの内容を追加
-    if reference_contents:
-        system_message += "\n\n## 参照ファイル\n"
-        for keyword, content in reference_contents.items():
-            system_message += f"\n### {keyword}\n{content}\n"
-    
-    # LLM APIを呼び出し
-    response = litellm.completion(
-        model=LITELLM_MODEL,
-        messages=[
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": product_message}
-        ],
-        api_base=LITELLM_API_BASE,
-        max_tokens=4096,
-        timeout=120
-    )
-    
-    result_text = response.choices[0].message.content
-    return result_text
+    logger.info(f"Stub response generated: {len(stub_response)} chars")
+    return stub_response
