@@ -233,16 +233,16 @@ def combine_results_to_excel(df, row_results, header_row, header_styles):
     Returns:
         bytes: Excelファイルのバイト列
     """
-    # チェック対象列のリスト
+    # チェック対象列のリスト（SKILL.md 指定の8列）
     check_columns = [
-        '変更後_キャッチコピーBtoC',
         '変更後_キャッチコピーBtoB',
-        '変更後_仕様スペック',
-        '変更後_商品説明文',
-        '変更後_商品名',
-        '変更後_検索用キーワード',
-        '変更後_使用上の注意',
-        '変更後_アスクルおススメポイント'
+        '変更後_商品の特徴BtoB',
+        '変更後_短いキャッチコピーBtoB',
+        '変更後_MDおすすめコメントBtoB',
+        '変更後_キャッチコピーBtoC',
+        '変更後_商品の特徴BtoC',
+        '変更後_MDおすすめコメントBtoC',
+        '変更後_短いキャッチコピーBtoC'
     ]
     
     # 各項目のチェック結果を格納する辞書
@@ -270,14 +270,24 @@ def combine_results_to_excel(df, row_results, header_row, header_styles):
                 check_results[col][row_index] = result_data[result_col_name]
     
     # 新しい列順を構築：各チェック対象列の直後にチェック結果列を挿入
+    # 元の列が存在しない場合でも結果列は追加
     all_columns = list(df.columns)
     new_df_dict = {}
+    added_check_columns = set()  # 追加済みの結果列を追跡
     
+    # まず元の列をループして、存在する列の直後に結果列を挿入
     for col in all_columns:
         # 元の列を追加
         new_df_dict[col] = df[col]
         # チェック対象列の場合、直後にチェック結果列を追加
         if col in check_columns:
+            result_col_name = f'{col}_チェック結果'
+            new_df_dict[result_col_name] = check_results[col]
+            added_check_columns.add(col)
+    
+    # 元の列に存在しないチェック対象列の結果列も末尾に追加
+    for col in check_columns:
+        if col not in added_check_columns:
             result_col_name = f'{col}_チェック結果'
             new_df_dict[result_col_name] = check_results[col]
     
