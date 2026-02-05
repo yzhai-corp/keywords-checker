@@ -4,7 +4,7 @@
   "States": {
     "SplitExcel": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:ap-northeast-1:ACCOUNT_ID:function:keywords-checker-splitter",
+      "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-splitter",
       "Comment": "S3からExcelファイルを読み込み、行データの配列に分割",
       "ResultPath": "$",
       "Next": "ProcessRows",
@@ -31,7 +31,7 @@
         "States": {
           "ProcessRow": {
             "Type": "Task",
-            "Resource": "arn:aws:lambda:ap-northeast-1:ACCOUNT_ID:function:keywords-checker-processor",
+            "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-processor",
             "Comment": "1行をLLM APIでチェック（スタブモード）、S3に結果保存",
             "ResultPath": "$",
             "Retry": [
@@ -79,7 +79,7 @@
     },
     "CombineResults": {
       "Type": "Task",
-      "Resource": "arn:aws:lambda:ap-northeast-1:ACCOUNT_ID:function:keywords-checker-combiner",
+      "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-combiner",
       "Comment": "S3から全結果を収集してExcelに統合、S3にアップロード",
       "ResultPath": "$",
       "End": true,
