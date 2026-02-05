@@ -96,6 +96,10 @@ Lambda Combiner
 
 ## データフロー詳細
 
+### S3経由のデータ受け渡し（10,000行対応）
+
+Step Functionsの256KB制限を回避するため、大量の行データをS3経由で受け渡します。
+
 ### 1. Lambda Splitter
 
 **入力:** S3イベント (input/sample.xlsx)
@@ -103,8 +107,9 @@ Lambda Combiner
 **処理:**
 - Excelファイルを読み込み
 - 各行を辞書形式に変換
+- **各行データをS3に個別保存** (`results/{execution_id}/rows/row_{index}.json`)
 - execution_idを生成（UUIDまたはタイムスタンプ）
-- 行データの配列を返す
+- S3キーのリストを返す（行データ本体は含めない）
 
 **出力:**
 ```json
@@ -114,15 +119,20 @@ Lambda Combiner
   "input_key": "input/sample.xlsx",
   "output_bucket": "your-bucket",
   "output_key": "output/sample_checked.xlsx",
-  "total_rows": 130,
-  "rows": [
+  "total_rows": 10000,
+  "s3_row_keys": [
     {
       "row_index": 0,
-      "変更後_キャッチコピーBtoC": "値",
-      "変更後_キャッチコピーBtoB": "値",
-      ...
+      "s3_key": "results/20260204-143025-abc123/rows/row_0.json",
+      "bucket": "your-bucket"
+    },
+    {
+      "row_index": 1,
+      "s3_key": "results/20260204-143025-abc123/rows/row_1.json",
+      "bucket": "your-bucket"
     },
     ...
+    // 10,000個のS3キー（各要素は数百バイト → 合計数MB以下）
   ]
 }
 ```
@@ -130,28 +140,27 @@ Lambda Combiner
 ### 2. Step Functions Map State
 
 **処理:**
-- `$.rows` 配列を並列処理
+- `$.s3_row_keys` 配列を並列処理
 - `MaxConcurrency: 500` で並列度制御
-- 各行に `execution_id` と `row_index` を渡す
+- 各アイテムに `execution_id`、`row_index`、`s3_key`、`bucket` を渡す
 
 ### 3. Lambda Processor
 
-**入力:** Map Stateから1行分のデータ
+**入力:** Map Stateから1行分のS3キー情報
 ```json
 {
   "execution_id": "20260204-143025-abc123",
   "row_index": 0,
-  "row_data": {
-    "変更後_キャッチコピーBtoC": "値",
-    ...
-  }
+  "s3_key": "results/20260204-143025-abc123/rows/row_0.json",
+  "bucket": "your-bucket"
 }
 ```
 
 **処理:**
-1. キーワード検出（200+キーワード）
-2. LLM API呼び出し（**スタブモード**）
-3. 結果をS3に保存: `s3://bucket/results/{execution_id}/{row_index}.json`
+1. **S3から行データを読み込み** (`s3_key`を使用)
+2. キーワード検出（200+キーワード）
+3. LLM API呼び出し（**スタブモード**: タイムアウト90秒）
+4. 結果をS3に保存: `s3://bucket/results/{execution_id}/{row_index}.json`
 
 **出力:**
 ```json
@@ -182,11 +191,12 @@ Lambda Combiner
   "input_key": "input/sample.xlsx",
   "output_bucket": "your-bucket",
   "output_key": "output/sample_checked.xlsx",
-  "total_rows": 130,
+  "total_rows": 10000,
   "results": [
     {"row_index": 0, "status": "success", "s3_key": "results/.../0.json"},
     {"row_index": 1, "status": "success", "s3_key": "results/.../1.json"},
     ...
+    // 10,000個の結果
   ]
 }
 ```
@@ -229,10 +239,14 @@ Lambda Combiner
 | 項目 | 値 |
 |------|-----|
 | ランタイム | Python 3.13 |
-| メモリ | 2048 MB |
-| タイムアウト | 10分 |
-| 環境変数 | なし |
-| IAM権限 | S3 Read (input/, results/), S3 Write (output/) |
+| メモリ | 1024 MB |
+| タイムアウト | 90秒（LLM API処理: 70秒 + マージン） |
+| 予約済み同時実行数 | 500 |
+| Lambda Layer | keywords-checker-skills-layer-sf (SKILL.md + 227 references) |
+| 環境変数 | RESULTS_BUCKET, LITELLM_MODE=stub, LITELLM_API_BASE, LITELLM_MODEL, OPENAI_API_KEY |
+| IAM権限 | S3 Read (results/), S3 Write (results/) |
+
+### Lambda Combiner
 
 ## Step Functions仕様
 
@@ -311,16 +325,34 @@ cd step-functions
 検出されたキーワード: ウイルス, 予防
 （スタブ応答）対象箇所の確認が必要です。
 ```
-+ EventBridge |
-|------|---------------|------------------------------|
-| タイムアウト | 15分（Lambda1の制限） | 無制限（最大1年） |
-| 並列度管理 | 手動（スロットリングリスク） | 自動（MaxConcurrency） |
-| エラーハンドリング | 複雑 | 自動リトライ、部分再処理可能 |
-| 進捗確認 | CloudWatch Logsのみ | Step Functionsコンソールで可視化 |
-| データ保存 | Lambda1メモリ（制限あり） | S3（無制限、256KB制限回避） |
-| コスト効率 | 待機時間もコスト発生 | 待機時間コストなし |
-| イベント履歴 | なし | EventBridgeで確認可能 |
-| トリガー | S3→Lambda直接 | S3→EventBridge→Step Functions
+
+## 処理時間の見積もり
+
+### 10,000行の場合（本番運用想定）
+
+| 項目 | 値 |
+|------|-----|
+| **データ行数** | 10,000行 |
+| **LLM API処理時間** | 70秒/行（平均） |
+| **並列処理数** | 500（MaxConcurrency） |
+| **総バッチ数** | 10,000 ÷ 500 = 20バッチ |
+| **Map State処理時間** | 20バッチ × 70秒 = 1,400秒（23.3分） |
+| **Splitter処理時間** | 10-20秒（Excel読み込み + S3保存） |
+| **Combiner処理時間** | 60-120秒（10,000結果読み込み + Excel生成） |
+| **合計処理時間** | **約25-27分** |
+
+### スケールアップ時の処理時間
+
+| 行数 | 並列数 | バッチ数 | Map処理時間 | 合計時間 |
+|------|--------|---------|------------|----------|
+| 1,000行 | 500 | 2 | 140秒 | **約3分** |
+| 5,000行 | 500 | 10 | 700秒 | **約13分** |
+| 10,000行 | 500 | 20 | 1,400秒 | **約25分** |
+| 20,000行 | 1,000 | 20 | 1,400秒 | **約25分**（並列数を1,000に増やす） |
+
+**注意**: 並列数を500以上に増やす場合、Lambda予約済み同時実行数とMaxConcurrencyを両方増やす必要があります。
+
+## Lambda→Lambda vs Step Functions
 | 項目 | Lambda→Lambda | Step Functions |
 |------|---------------|----------------|
 | タイムアウト | 15分（Lambda1の制限） | 無制限（最大1年） |

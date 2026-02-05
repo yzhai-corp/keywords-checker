@@ -2,6 +2,28 @@
 
 このドキュメントは、AWS Step Functionsを使用したKeywords Checkerのデプロイ手順を説明します。
 
+## ⚠️ 重要: S3最適化版について
+
+**このアーキテクチャはS3経由のデータ受け渡し方式を採用しています。**
+
+### 背景
+- Step Functionsの256KB制限により、大量の行データを直接渡すことができません
+- 10,000行の場合、行データ配列は数MBになり制限を超えます
+
+### 解決策
+- **Splitter**: 各行データをS3に個別保存（`results/{execution_id}/rows/row_{index}.json`）
+- **State Machine**: S3キーのリストのみを処理（数KB）
+- **Processor**: S3から行データを読み込んで処理
+
+### メリット
+- ✅ **10,000行以上対応**: 256KB制限を回避
+- ✅ **処理時間**: 10,000行を約25-27分で処理（並列数500）
+- ✅ **スケーラブル**: 並列数を増やせばさらに高速化可能
+
+詳細は [S3_OPTIMIZATION.md](S3_OPTIMIZATION.md) を参照してください。
+
+---
+
 ## 目次
 
 1. [前提条件](#前提条件)
@@ -386,7 +408,7 @@ aws lambda create-function \
   --role arn:aws:iam::ACCOUNT_ID:role/keywords-checker-processor-role \
   --handler lambda_function.lambda_handler \
   --code S3Bucket=YOUR-DEPLOYMENT-BUCKET,S3Key=lambda-code/processor.zip \
-  --timeout 120 \
+  --timeout 90 \
   --memory-size 1024 \
   --environment "Variables={RESULTS_BUCKET=YOUR-BUCKET,LITELLM_MODE=stub,LITELLM_API_BASE=https://askul-gpt.askul-it.com/v1,LITELLM_MODEL=gpt-5-mini,OPENAI_API_KEY=sk-xxxxxx}" \
   --layers arn:aws:lambda:ap-northeast-1:ACCOUNT_ID:layer:keywords-checker-skills-layer-sf:1
@@ -461,6 +483,7 @@ aws lambda create-function \
    - `state-machine.json` の内容をコピー
    - `ACCOUNT_ID` を実際のAWSアカウントIDに置き換え
    - 定義エディターに貼り付け
+   - **重要**: S3最適化版では `ItemsPath: "$.s3_row_keys"` を使用（256KB制限回避）
 
 5. **ステートマシンの名前:**
    - `keywords-checker-state-machine`
@@ -727,35 +750,55 @@ def lambda_handler(event, context):
   "output_bucket": "YOUR-BUCKET",
   "output_key": "output/result_20260204_143025_sample.xlsx",
   "total_rows": 130,
-  "rows": [
+  "s3_row_keys": [
     {
       "row_index": 0,
-      "変更後_キャッチコピーBtoC": "値",
-      ...
+      "s3_key": "results/20260204-143025-abc123/rows/row_0.json",
+      "bucket": "YOUR-BUCKET"
+    },
+    {
+      "row_index": 1,
+      "s3_key": "results/20260204-143025-abc123/rows/row_1.json",
+      "bucket": "YOUR-BUCKET"
     },
     ...
   ]
 }
 ```
 
+**注意**: S3最適化版では、行データ本体は含まれず、S3キーのリストのみが返されます。これにより256KB制限を回避し、10,000行以上の処理が可能になります。
+
 ### Step 9: Processor Lambda関数の個別テスト
 
-#### テストイベント
+#### テストイベント（S3最適化版）
+
+**前提**: テスト用の行データをS3に事前保存しておく必要があります。
+
+```bash
+# テスト用の行データをS3に保存
+echo '{
+  "row_index": 0,
+  "変更後_キャッチコピーBtoC": "ウイルス予防に効果的",
+  "変更後_キャッチコピーBtoB": "免疫力アップ",
+  "変更後_仕様スペック": "",
+  "変更後_商品説明文": "",
+  "変更後_商品名": "サプリメント",
+  "変更後_検索用キーワード": "",
+  "変更後_使用上の注意": "",
+  "変更後_アスクルおススメポイント": ""
+}' > test_row_0.json
+
+aws s3 cp test_row_0.json s3://YOUR-BUCKET/results/test-20260204/rows/row_0.json --region ap-northeast-1
+```
+
+**Lambda Processorテストイベント**:
 
 ```json
 {
   "execution_id": "test-20260204",
   "row_index": 0,
-  "row_data": {
-    "変更後_キャッチコピーBtoC": "ウイルス予防に効果的",
-    "変更後_キャッチコピーBtoB": "免疫力アップ",
-    "変更後_仕様スペック": "",
-    "変更後_商品説明文": "",
-    "変更後_商品名": "サプリメント",
-    "変更後_検索用キーワード": "",
-    "変更後_使用上の注意": "",
-    "変更後_アスクルおススメポイント": ""
-  }
+  "s3_key": "results/test-20260204/rows/row_0.json",
+  "bucket": "YOUR-BUCKET"
 }
 ```
 

@@ -18,13 +18,14 @@
     },
     "ProcessRows": {
       "Type": "Map",
-      "ItemsPath": "$.rows",
+      "ItemsPath": "$.s3_row_keys",
       "MaxConcurrency": 500,
       "Comment": "各行を並列処理（最大500並列）",
       "Parameters": {
         "execution_id.$": "$.execution_id",
         "row_index.$": "$$.Map.Item.Value.row_index",
-        "row_data.$": "$$.Map.Item.Value"
+        "s3_key.$": "$$.Map.Item.Value.s3_key",
+        "bucket.$": "$$.Map.Item.Value.bucket"
       },
       "Iterator": {
         "StartAt": "ProcessRow",

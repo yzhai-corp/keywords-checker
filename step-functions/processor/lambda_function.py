@@ -40,11 +40,8 @@ def lambda_handler(event, context):
     {
         "execution_id": "20260204-143025-abc123",
         "row_index": 0,
-        "row_data": {
-            "変更後_キャッチコピーBtoC": "値",
-            "変更後_キャッチコピーBtoB": "値",
-            ...
-        }
+        "s3_key": "results/execution_id/rows/row_0.json",
+        "bucket": "bucket-name"
     }
     
     Returns:
@@ -55,14 +52,19 @@ def lambda_handler(event, context):
     }
     """
     try:
-        logger.info(f"Lambda Processor started. Row: {event.get('row_index', -1)}")
+        logger.info(f"Lambda Processor started. Event: {json.dumps(event)}")
         
         execution_id = event.get('execution_id')
         row_index = event.get('row_index')
-        row_data = event.get('row_data', {})
+        s3_key = event.get('s3_key')
+        bucket = event.get('bucket', RESULTS_BUCKET)
         
-        if execution_id is None or row_index is None:
-            raise ValueError("execution_id and row_index are required")
+        if execution_id is None or row_index is None or s3_key is None:
+            raise ValueError("execution_id, row_index, and s3_key are required")
+        
+        # S3から行データを読み込み
+        logger.info(f"Row {row_index}: Loading row data from s3://{bucket}/{s3_key}")
+        row_data = load_row_data_from_s3(bucket, s3_key)
         
         # 商品情報メッセージを構築
         product_message = build_product_message(row_data)
@@ -136,6 +138,26 @@ def lambda_handler(event, context):
             's3_key': s3_key,
             'error': str(e)
         }
+
+
+def load_row_data_from_s3(bucket, s3_key):
+    """
+    S3から行データを読み込み
+    
+    Args:
+        bucket: S3バケット名
+        s3_key: S3オブジェクトキー
+        
+    Returns:
+        dict: 行データ
+    """
+    try:
+        response = s3_client.get_object(Bucket=bucket, Key=s3_key)
+        row_data = json.loads(response['Body'].read().decode('utf-8'))
+        return row_data
+    except Exception as e:
+        logger.error(f"Failed to load row data from s3://{bucket}/{s3_key}: {str(e)}")
+        raise
 
 
 def build_product_message(row_data):

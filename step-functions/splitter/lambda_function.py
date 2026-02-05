@@ -118,7 +118,13 @@ def lambda_handler(event, context):
         
         logger.info(f"Parsed Excel: {total_rows} rows")
         
-        # Step Functionsに渡すデータを構築
+        # 各行データをS3に保存し、S3キーのリストを作成
+        logger.info(f"Saving {total_rows} rows to S3...")
+        s3_keys = save_rows_to_s3(bucket, execution_id, rows_data)
+        
+        logger.info(f"Saved {len(s3_keys)} rows to S3")
+        
+        # Step Functionsに渡すデータを構築（S3キーのリストのみ）
         result = {
             'execution_id': execution_id,
             'input_bucket': bucket,
@@ -126,7 +132,7 @@ def lambda_handler(event, context):
             'output_bucket': bucket,
             'output_key': output_key,
             'total_rows': total_rows,
-            'rows': rows_data
+            's3_row_keys': s3_keys  # S3キーのリスト（各要素は{"row_index": 0, "s3_key": "..."} の形式）
         }
         
         logger.info(f"Splitter completed: {total_rows} rows prepared for processing")
@@ -220,3 +226,49 @@ def parse_excel_to_rows(excel_bytes):
     except Exception as e:
         logger.error(f"Failed to parse Excel: {str(e)}")
         raise
+
+
+def save_rows_to_s3(bucket, execution_id, rows_data):
+    """
+    各行データをS3に個別に保存し、S3キーのリストを返す
+    
+    Args:
+        bucket: S3バケット名
+        execution_id: 実行ID
+        rows_data: 行データの配列
+        
+    Returns:
+        list: S3キーの配列
+        [
+            {"row_index": 0, "s3_key": "results/execution_id/rows/row_0.json"},
+            {"row_index": 1, "s3_key": "results/execution_id/rows/row_1.json"},
+            ...
+        ]
+    """
+    try:
+        s3_keys = []
+        
+        for row_data in rows_data:
+            row_index = row_data['row_index']
+            s3_key = f"results/{execution_id}/rows/row_{row_index}.json"
+            
+            # 行データをJSONとしてS3に保存
+            s3_client.put_object(
+                Bucket=bucket,
+                Key=s3_key,
+                Body=json.dumps(row_data, ensure_ascii=False),
+                ContentType='application/json'
+            )
+            
+            s3_keys.append({
+                'row_index': row_index,
+                's3_key': s3_key,
+                'bucket': bucket
+            })
+        
+        return s3_keys
+        
+    except Exception as e:
+        logger.error(f"Failed to save rows to S3: {str(e)}")
+        raise
+
