@@ -112,14 +112,14 @@ def lambda_handler(event, context):
             
             # 全列にエラーメッセージを設定
             check_columns = [
-                '変更後_キャッチコピーBtoC',
                 '変更後_キャッチコピーBtoB',
-                '変更後_仕様スペック',
-                '変更後_商品説明文',
-                '変更後_商品名',
-                '変更後_検索用キーワード',
-                '変更後_使用上の注意',
-                '変更後_アスクルおススメポイント'
+                '変更後_商品の特徴BtoB',
+                '変更後_短いキャッチコピーBtoB',
+                '変更後_MDおすすめコメントBtoB',
+                '変更後_キャッチコピーBtoC',
+                '変更後_商品の特徴BtoC',
+                '変更後_MDおすすめコメントBtoC',
+                '変更後_短いキャッチコピーBtoC'
             ]
             
             for col in check_columns:
@@ -267,16 +267,16 @@ def generate_stub_response(reference_contents):
     """スタブレスポンスを生成"""
     detected_keywords = list(reference_contents.keys())
     
-    # チェック対象列のリスト
+    # チェック対象列のリスト（SKILL.md 指定の8列）
     check_columns = [
-        '変更後_キャッチコピーBtoC',
         '変更後_キャッチコピーBtoB',
-        '変更後_仕様スペック',
-        '変更後_商品説明文',
-        '変更後_商品名',
-        '変更後_検索用キーワード',
-        '変更後_使用上の注意',
-        '変更後_アスクルおススメポイント'
+        '変更後_商品の特徴BtoB',
+        '変更後_短いキャッチコピーBtoB',
+        '変更後_MDおすすめコメントBtoB',
+        '変更後_キャッチコピーBtoC',
+        '変更後_商品の特徴BtoC',
+        '変更後_MDおすすめコメントBtoC',
+        '変更後_短いキャッチコピーBtoC'
     ]
     
     stub_response = ""

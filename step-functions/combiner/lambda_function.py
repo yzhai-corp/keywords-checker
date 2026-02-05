@@ -143,19 +143,19 @@ def parse_excel(excel_bytes):
     Returns:
         tuple: (df, header_row, header_styles)
     """
-    # openpyxlでワークブックを読み込み
-    wb = load_workbook(io.BytesIO(excel_bytes))
+    # openpyxlでワークブックを読み込み（.xlsm対応）
+    wb = load_workbook(io.BytesIO(excel_bytes), keep_vba=True, data_only=True)
     ws = wb.active
     
-    # ヘッダー行を検索
+    # ヘッダー行を検索（最大20行まで拡張）
     header_row = None
-    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=10, values_only=True), start=1):
-        if '商品名' in [str(cell) for cell in row if cell]:
+    for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=20, values_only=True), start=1):
+        if any('商品名' in str(cell) for cell in row if cell):
             header_row = row_idx
             break
     
     if header_row is None:
-        raise ValueError("Header row with '商品名' not found in first 10 rows")
+        raise ValueError("Header row with '商品名' not found in first 20 rows")
     
     # ヘッダーのスタイル情報を取得
     header_styles = {}
