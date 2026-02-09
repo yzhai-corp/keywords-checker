@@ -4,6 +4,10 @@
 
 このディレクトリには、AWS Step FunctionsとLambdaを使用した大規模バッチ処理アーキテクチャの実装が含まれています。
 
+**ネットワーク構成**: 詳細は [AWS_INFRASTRUCTURE.md](../docs/AWS_INFRASTRUCTURE.md) の「ネットワーク構成」セクションを参照してください。
+- **Sandbox環境**: すべてVPC外で動作（スタブモード）
+- **Production環境**: Processor LambdaのみVPC内に配置（LiteLLM API接続用）
+
 ## アーキテクチャ図
 
 ### AWSアーキテクチャ概要
