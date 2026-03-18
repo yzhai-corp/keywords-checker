@@ -1,0 +1,111 @@
+{
+  "Comment": "Keywords Checker - Step Functions Parallel Processing",
+  "StartAt": "SplitExcel",
+  "States": {
+    "SplitExcel": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-splitter",
+      "Comment": "S3からExcelファイルを読み込み、行データの配列に分割",
+      "ResultPath": "$",
+      "Next": "ProcessRows",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "SplitFailed"
+        }
+      ]
+    },
+    "ProcessRows": {
+      "Type": "Map",
+      "ItemsPath": "$.s3_row_keys",
+      "MaxConcurrency": 500,
+      "Comment": "各行を並列処理（最大500並列）",
+      "Parameters": {
+        "execution_id.$": "$.execution_id",
+        "row_index.$": "$$.Map.Item.Value.row_index",
+        "s3_key.$": "$$.Map.Item.Value.s3_key",
+        "bucket.$": "$$.Map.Item.Value.bucket"
+      },
+      "Iterator": {
+        "StartAt": "ProcessRow",
+        "States": {
+          "ProcessRow": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-processor",
+            "Comment": "1行をLLM APIでチェック（スタブモード）、S3に結果保存",
+            "ResultPath": "$",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.TaskFailed",
+                  "Lambda.ServiceException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "ProcessRowFailed"
+              }
+            ],
+            "End": true
+          },
+          "ProcessRowFailed": {
+            "Type": "Pass",
+            "Comment": "行の処理に失敗した場合、エラー情報を含めて返す",
+            "Result": {
+              "status": "error",
+              "error": "Row processing failed"
+            },
+            "ResultPath": "$",
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.results",
+      "Next": "CombineResults",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "ProcessFailed"
+        }
+      ]
+    },
+    "CombineResults": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:902163356275:function:keywords-checker-combiner",
+      "Comment": "S3から全結果を収集してExcelに統合、S3にアップロード",
+      "ResultPath": "$",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CombineFailed"
+        }
+      ]
+    },
+    "SplitFailed": {
+      "Type": "Fail",
+      "Error": "SplitterError",
+      "Cause": "Failed to split Excel file into rows"
+    },
+    "ProcessFailed": {
+      "Type": "Fail",
+      "Error": "ProcessorError",
+      "Cause": "Failed to process rows in parallel"
+    },
+    "CombineFailed": {
+      "Type": "Fail",
+      "Error": "CombinerError",
+      "Cause": "Failed to combine results into Excel file"
+    }
+  }
+}
